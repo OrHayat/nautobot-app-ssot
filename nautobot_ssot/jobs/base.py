@@ -8,6 +8,7 @@ import traceback
 import tracemalloc
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable, Optional
@@ -31,6 +32,17 @@ from nautobot_ssot.choices import SyncLogEntryActionChoices
 from nautobot_ssot.contrib.adapter import NautobotAdapter
 from nautobot_ssot.contrib.component_creation import SkipAutoComponentCreation
 from nautobot_ssot.models import BaseModel, Sync, SyncLogEntry
+
+
+@contextmanager
+def _stop_tracemalloc_started_within():
+    """Stop memory tracing that the wrapped block started, so it does not outlive the job in the worker."""
+    was_tracing = tracemalloc.is_tracing()
+    try:
+        yield
+    finally:
+        if tracemalloc.is_tracing() and not was_tracing:
+            tracemalloc.stop()
 
 
 def _maybe_suppress_auto_component_creation(func):
@@ -421,15 +433,16 @@ class DataSyncBaseJob(Job):  # pylint: disable=too-many-instance-attributes
                     )
                 size /= 1024
 
-        def record_memory_trace(step: str):
-            """Helper function to record memory usage and reset tracemalloc stats."""
+        def record_memory_trace(*steps: str):
+            """Helper function to record memory usage against each step and reset tracemalloc stats."""
             memory_final, memory_peak = tracemalloc.get_traced_memory()
-            setattr(self.sync, f"{step}_memory_final", memory_final)
-            setattr(self.sync, f"{step}_memory_peak", memory_peak)
+            for step in steps:
+                setattr(self.sync, f"{step}_memory_final", memory_final)
+                setattr(self.sync, f"{step}_memory_peak", memory_peak)
             self.sync.save()
             self.logger.info(
                 "Traced memory for %s (Final, Peak): %s, %s",
-                step,
+                " and ".join(steps),
                 format_size(memory_final),
                 format_size(memory_peak),
             )
@@ -468,8 +481,8 @@ class DataSyncBaseJob(Job):  # pylint: disable=too-many-instance-attributes
                     self.sync.target_load_time = target_duration
                 self.sync.save()
                 if memory_profiling:
-                    # Record memory after both adapters are loaded
-                    record_memory_trace("parallel_load")
+                    # Both adapters load together, so as with the load times, the one trace is recorded for both
+                    record_memory_trace("source_load", "target_load")
             except Exception as error:
                 self.logger.error("Error during parallel adapter loading: %s", error)
                 raise
@@ -695,7 +708,8 @@ class DataSyncBaseJob(Job):  # pylint: disable=too-many-instance-attributes
             wrapper_class=structlog.stdlib.BoundLogger,
             cache_logger_on_first_use=True,
         )
-        self.sync_data(self.memory_profiling)
+        with _stop_tracemalloc_started_within():
+            self.sync_data(self.memory_profiling)
 
 
 # pylint: disable=abstract-method

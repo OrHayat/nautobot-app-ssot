@@ -5,6 +5,7 @@ import logging
 import os.path
 import threading
 import time
+import tracemalloc
 from unittest.mock import MagicMock, Mock, call, patch
 
 import structlog
@@ -316,6 +317,27 @@ class JobBehaviorTestCase(_JobTestSetupMixin, TestCase):  # pylint: disable=too-
         ):
             self.job.run(dryrun=True, memory_profiling=True, parallel_loading=False)
         self.assertEqual(self.job.sync.source_load_memory_final, 51200)
+
+    def test_memory_profiling_stops_tracing_after_job(self):
+        """Memory profiling does not leave tracemalloc tracing the worker once the job is done."""
+        self.addCleanup(tracemalloc.stop)
+        self.job.run(dryrun=True, memory_profiling=True, parallel_loading=False)
+        self.assertFalse(tracemalloc.is_tracing())
+
+    def test_memory_profiling_stops_tracing_when_sync_fails(self):
+        """Tracing the job started is stopped even when the sync raises."""
+        self.addCleanup(tracemalloc.stop)
+        with patch.object(self.job, "calculate_diff", side_effect=RuntimeError("diff failed")):
+            with self.assertRaises(RuntimeError):
+                self.job.run(dryrun=True, memory_profiling=True, parallel_loading=False)
+        self.assertFalse(tracemalloc.is_tracing())
+
+    def test_memory_profiling_keeps_tracing_started_before_job(self):
+        """Tracing that was already running before the job is left running."""
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
+        self.job.run(dryrun=True, memory_profiling=True, parallel_loading=False)
+        self.assertTrue(tracemalloc.is_tracing())
 
     def test_parallel_loading_only_source_duration(self):
         """When only a source duration is reported, both load times take that value."""
@@ -734,7 +756,7 @@ class ParallelLoadingTestCase(_JobTestSetupMixin, TransactionTestCase):  # pylin
         self.assertIn("debug", levels)
 
     def test_parallel_loading_with_memory_profiling(self):
-        """Parallel loading with memory profiling records a parallel-load memory trace."""
+        """Parallel loading with memory profiling records the load memory against both load phases."""
         mock_diff = self._create_mock_diff()
 
         def load_source():
@@ -756,6 +778,12 @@ class ParallelLoadingTestCase(_JobTestSetupMixin, TransactionTestCase):  # pylin
         ):
             self.job.run(dryrun=True, memory_profiling=True, parallel_loading=True)
         self.assertIsNotNone(self.job.sync.source_load_time)
+        # Both adapters load together, so the one trace is recorded against both load phases.
+        self.job.sync.refresh_from_db()
+        self.assertEqual(self.job.sync.source_load_memory_final, 2048)
+        self.assertEqual(self.job.sync.source_load_memory_peak, 4096)
+        self.assertEqual(self.job.sync.target_load_memory_final, 2048)
+        self.assertEqual(self.job.sync.target_load_memory_peak, 4096)
 
 
 class DataSourceJobTestCase(TestCase):

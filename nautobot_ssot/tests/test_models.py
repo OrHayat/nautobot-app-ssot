@@ -57,6 +57,17 @@ class SyncTestCase(TestCase):
         time.sleep(1)
         self.assertEqual(duration, self.source_sync.duration)
 
+    def test_duration_while_job_is_running(self):
+        """A Sync whose job has started but not finished reports the time elapsed so far."""
+        self.source_sync.start_time = now() - datetime.timedelta(seconds=5)
+        self.source_sync.job_result = JobResult(
+            name="ExampleDataSource",
+            task_name="nautobot_ssot.jobs.examples.ExampleDataSource",
+            worker="default",
+            status=JobResultStatusChoices.STATUS_STARTED,
+        )
+        self.assertGreaterEqual(self.source_sync.duration, datetime.timedelta(seconds=5))
+
     def test_get_source_target_url(self):
         """Test the get_source_url() and get_target_url() methods."""
         # No JobResult

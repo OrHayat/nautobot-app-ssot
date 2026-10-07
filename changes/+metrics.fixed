@@ -1,0 +1,6 @@
+Fixed `nautobot_ssot_duration_seconds` dropping the whole days from any phase that ran for a day or longer, and reporting `source_load_time` on a different scale from the other phases.
+Fixed the per-status counts in the sync count gauge always reporting zero.
+Fixed `nautobot_ssot_sync_memory_usage_bytes` reporting a sync's create, update and delete counts in place of the memory it used in bytes.
+Fixed memory profiling with parallel loading discarding the memory used to load the adapters, which also left those syncs out of `nautobot_ssot_sync_memory_usage_bytes`.
+Fixed memory profiling leaving memory tracing running in the worker after the job finished, which slowed every job that worker ran afterwards.
+Fixed a running Sync reporting no duration.

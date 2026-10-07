@@ -11,6 +11,17 @@ from nautobot_ssot.models import Sync
 
 PLUGIN_SETTINGS = settings.PLUGINS_CONFIG.get("nautobot_ssot", {})
 
+MEMORY_FIELDS = (
+    "source_load_memory_final",
+    "source_load_memory_peak",
+    "target_load_memory_final",
+    "target_load_memory_peak",
+    "diff_memory_final",
+    "diff_memory_peak",
+    "sync_memory_final",
+    "sync_memory_peak",
+)
+
 
 def metric_ssot_jobs():
     """Extracts duration of latest SSoT Job run.
@@ -33,37 +44,19 @@ def metric_ssot_jobs():
         if not last_job_sync:
             continue
 
-        if last_job_sync.source_load_time:
-            ssot_job_durations.add_metric(
-                labels=["source_load_time", ".".join(job.natural_key())],
-                value=((last_job_sync.source_load_time.seconds * 100000) + last_job_sync.source_load_time.microseconds)
-                / 1000,
-            )
-
-        if last_job_sync.target_load_time:
-            ssot_job_durations.add_metric(
-                labels=["target_load_time", ".".join(job.natural_key())],
-                value=((last_job_sync.target_load_time.seconds * 1000000) + last_job_sync.target_load_time.microseconds)
-                / 1000,
-            )
-
-        if last_job_sync.diff_time:
-            ssot_job_durations.add_metric(
-                labels=["diff_time", ".".join(job.natural_key())],
-                value=((last_job_sync.diff_time.seconds * 1000000) + last_job_sync.diff_time.microseconds) / 1000,
-            )
-
-        if last_job_sync.sync_time:
-            ssot_job_durations.add_metric(
-                labels=["sync_time", ".".join(job.natural_key())],
-                value=((last_job_sync.sync_time.seconds * 1000000) + last_job_sync.sync_time.microseconds) / 1000,
-            )
-
-        if last_job_sync.duration:
-            ssot_job_durations.add_metric(
-                labels=["sync_duration", ".".join(job.natural_key())],
-                value=((last_job_sync.duration.seconds * 1000000) + last_job_sync.duration.microseconds) / 1000,
-            )
+        phases = {
+            "source_load_time": last_job_sync.source_load_time,
+            "target_load_time": last_job_sync.target_load_time,
+            "diff_time": last_job_sync.diff_time,
+            "sync_time": last_job_sync.sync_time,
+            "sync_duration": last_job_sync.duration,
+        }
+        for phase, duration in phases.items():
+            if duration:
+                ssot_job_durations.add_metric(
+                    labels=[phase, ".".join(job.natural_key())],
+                    value=duration.total_seconds(),
+                )
 
     yield ssot_job_durations
 
@@ -74,13 +67,14 @@ def metric_syncs():
     Yields:
         GaugeMetricFamily: Prometheus Metrics
     """
-    sync_gauge = GaugeMetricFamily("nautobot_ssot_sync_total", "Nautobot SSoT Sync Totals", labels=["sync_type"])
+    sync_gauge = GaugeMetricFamily("nautobot_ssot_syncs", "Nautobot SSoT Sync Totals", labels=["sync_type"])
 
     sync_gauge.add_metric(labels=["total_syncs"], value=Sync.objects.all().count())
 
-    for status_type in [x[1].lower() for x in JobResultStatusChoices]:
+    for status_value, status_label in JobResultStatusChoices:
         sync_gauge.add_metric(
-            labels=[f"{status_type}_syncs"], value=Sync.objects.filter(job_result__status=status_type).count()
+            labels=[f"{status_label.lower()}_syncs"],
+            value=Sync.objects.filter(job_result__status=status_value).count(),
         )
 
     yield sync_gauge
@@ -93,7 +87,7 @@ def metric_sync_operations():
         GuageMetricFamily: Prometheus Metrics
     """
     sync_ops = GaugeMetricFamily(
-        "nautobot_ssot_operation_total", "Nautobot SSoT operations by Job", labels=["job", "operation"]
+        "nautobot_ssot_sync_operations", "Nautobot SSoT operations by Job", labels=["job", "operation"]
     )
 
     for job in Job.objects.all():
@@ -132,10 +126,13 @@ def metric_memory_usage():
         last_job_sync = Sync.objects.filter(
             job_result__job_model_id=job.id, source_load_memory_final__isnull=False
         ).last()
-        if last_job_sync and last_job_sync.summary:
-            for operation, value in last_job_sync.summary.items():
+        if not last_job_sync:
+            continue
+        for field in MEMORY_FIELDS:
+            value = getattr(last_job_sync, field)
+            if value is not None:
                 memory_gauge.add_metric(
-                    labels=[operation, ".".join(job.natural_key())],
+                    labels=[field, ".".join(job.natural_key())],
                     value=value,
                 )
 

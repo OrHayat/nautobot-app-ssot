@@ -1,0 +1,1 @@
+Corrected the sample Prometheus output in the metrics documentation to show durations in seconds, the current sync status labels, and memory usage per profiled phase.

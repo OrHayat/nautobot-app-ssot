@@ -1,0 +1,3 @@
+Changed `nautobot_ssot_duration_seconds` to report seconds. It previously reported milliseconds under a name that says seconds, so dashboards and alerts built on it need their thresholds divided by 1000.
+Renamed the `nautobot_ssot_sync_total` gauge to `nautobot_ssot_syncs` and the `nautobot_ssot_operation_total` gauge to `nautobot_ssot_sync_operations`, as the `_total` suffix is reserved for counters.
+Changed the `phase` label of `nautobot_ssot_sync_memory_usage_bytes` to name the profiled field it reports, such as `source_load_memory_peak`, in place of the create, update and delete operations it reported before.

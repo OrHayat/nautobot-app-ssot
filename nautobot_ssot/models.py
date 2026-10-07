@@ -29,7 +29,6 @@ from django.utils.formats import date_format
 from django.utils.html import format_html
 from django.utils.timezone import now
 from nautobot.core.models import BaseModel
-from nautobot.extras.choices import JobResultStatusChoices
 from nautobot.extras.models import JobResult
 from nautobot.extras.utils import extras_features
 
@@ -139,14 +138,13 @@ class Sync(BaseModel):  # pylint: disable=nb-string-field-blank-null
         )
 
     @property
-    def duration(self):  # pylint: disable=inconsistent-return-statements
+    def duration(self):
         """Total execution time of this Sync."""
         if not self.start_time:
             return timedelta()  # zero
-        if not self.job_result or self.job_result.status == JobResultStatusChoices.STATUS_PENDING:
+        if not self.job_result or not self.job_result.date_done:
             return now() - self.start_time
-        if self.job_result and self.job_result.date_done:
-            return self.job_result.date_done - self.start_time
+        return self.job_result.date_done - self.start_time
 
     @property
     def end_time(self):
